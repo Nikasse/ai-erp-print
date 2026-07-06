@@ -41,3 +41,20 @@ docker compose down
 |---|---|
 | `/start` | Привітання |
  | /help | Список команд |
+
+## Debug / Troubleshooting
+
+Запуск бота:
+
+```bash
+docker compose up --build
+```
+
+Зупинка: `Ctrl+C`
+
+Часті проблеми:
+- Docker не запущений (`docker.sock: no such file`) → відкрити Docker Desktop
+- `logging.info` не виводить → перевірити `logging.basicConfig(level=logging.INFO)`
+- локальний запуск падає на Python 3.14 → запускати через Docker
+
+Детальніше про помилки — див. DEBUG.md
