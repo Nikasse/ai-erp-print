@@ -1,4 +1,5 @@
 import asyncio
+import logging
 import os
 
 from aiogram import Bot, Dispatcher
@@ -22,8 +23,11 @@ async def handle_help(message: Message) -> None:
 
 
 async def main() -> None:
+    logging.basicConfig(level=logging.INFO)
+    logging.info("Бот успішно запущено")
     await dp.start_polling(bot)
 
 
 if __name__ == "__main__":
     asyncio.run(main())
+
