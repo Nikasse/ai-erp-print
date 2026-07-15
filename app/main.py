@@ -1,13 +1,16 @@
 import asyncio
 import logging
 import os
+from decimal import Decimal, InvalidOperation
 
 from aiogram import Bot, Dispatcher
-from aiogram.filters import CommandStart, Command
+from aiogram.filters import CommandStart, Command, CommandObject
 from aiogram.types import Message
 from dotenv import load_dotenv
+from sqlalchemy import select
 
-from app.db import init_models
+from app.db import async_session, init_models
+from app.models import Transaction, User
 
 load_dotenv()
 
@@ -22,6 +25,38 @@ async def handle_start(message: Message) -> None:
 @dp.message(Command("help"))
 async def handle_help(message: Message) -> None:
     await message.answer("Доступні команди:\n/start — почати роботу\n/help — список команд")
+
+
+@dp.message(Command("expense"))
+async def handle_expense(message: Message, command: CommandObject) -> None:
+    if not command.args:
+        await message.answer("Формат: /expense 120 кава")
+        return
+
+    parts = command.args.split(maxsplit=1)
+    if len(parts) < 2:
+        await message.answer("Формат: /expense 120 кава")
+        return
+
+    amount_raw, description = parts
+    try:
+        amount = Decimal(amount_raw)
+    except InvalidOperation:
+        await message.answer("Сума має бути числом. Формат: /expense 120 кава")
+        return
+
+    async with async_session() as session:
+        result = await session.execute(select(User).where(User.telegram_id == message.from_user.id))
+        user = result.scalar_one_or_none()
+        if user is None:
+            user = User(telegram_id=message.from_user.id, username=message.from_user.username)
+            session.add(user)
+            await session.flush()
+
+        session.add(Transaction(user_id=user.id, amount=amount, description=description))
+        await session.commit()
+
+    await message.answer(f"Витрату збережено: {amount_raw} — {description}")
 
 
 async def main() -> None:
