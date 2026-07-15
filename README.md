@@ -20,7 +20,7 @@ BOT_TOKEN=your_bot_token_here
 
 ```bash
 pip install -r requirements.txt
-python app/main.py
+python -m app.main
 ```
 
 ### Запуск через Docker

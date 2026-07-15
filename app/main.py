@@ -7,6 +7,8 @@ from aiogram.filters import CommandStart, Command
 from aiogram.types import Message
 from dotenv import load_dotenv
 
+from app.db import init_models
+
 load_dotenv()
 
 bot = Bot(token=os.getenv("BOT_TOKEN"))
@@ -24,6 +26,7 @@ async def handle_help(message: Message) -> None:
 
 async def main() -> None:
     logging.basicConfig(level=logging.INFO)
+    await init_models()
     logging.info("Бот успішно запущено")
     await dp.start_polling(bot)
 
