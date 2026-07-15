@@ -13,4 +13,4 @@
 - .gitignore — не пускає .env у Git
 
 ## Якщо секрет витік
-Перевипустити ключ: BOT_TOKEN через @BotFather, DATABASE_URL через Neon.
+Перевипустити ключ: BOT_TOKEN через @BotFather, DATABASE_URL через Neon (reset password).
