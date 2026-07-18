@@ -10,7 +10,9 @@ from dotenv import load_dotenv
 from sqlalchemy import select
 
 from app.db import async_session, init_models
-from app.models import Transaction, User
+from app.models import Category, Transaction, TransactionType, User
+
+DEFAULT_EXPENSE_CATEGORY = "Витрати"
 
 load_dotenv()
 
@@ -53,7 +55,20 @@ async def handle_expense(message: Message, command: CommandObject) -> None:
             session.add(user)
             await session.flush()
 
-        session.add(Transaction(user_id=user.id, amount=amount, description=description))
+        result = await session.execute(
+            select(Category).where(
+                Category.user_id == user.id,
+                Category.name == DEFAULT_EXPENSE_CATEGORY,
+                Category.type == TransactionType.expense,
+            )
+        )
+        category = result.scalar_one_or_none()
+        if category is None:
+            category = Category(user_id=user.id, name=DEFAULT_EXPENSE_CATEGORY, type=TransactionType.expense)
+            session.add(category)
+            await session.flush()
+
+        session.add(Transaction(user_id=user.id, category_id=category.id, amount=amount, description=description))
         await session.commit()
 
     await message.answer(f"Витрату збережено: {amount_raw} — {description}")
