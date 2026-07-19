@@ -1,12 +1,19 @@
 from datetime import datetime
 
-from fastapi import FastAPI
+from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 from sqlalchemy import func, select
+from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.db import async_session
-from app.models import Category, Transaction, TransactionType
+from app.models import Category, Transaction, TransactionType, User
+
+# Transactions/categories created through the API aren't tied to a Telegram
+# user, so they're attributed to a single shared system user instead of
+# requiring auth. -1 is outside the range of real Telegram user ids.
+API_USER_TELEGRAM_ID = -1
+API_USER_USERNAME = "api"
 
 app = FastAPI(title="ai-erp-print API")
 
@@ -32,6 +39,23 @@ class SummaryOut(BaseModel):
     total_income: float
     total_expense: float
     balance: float
+
+
+class TransactionIn(BaseModel):
+    amount: float
+    type: str
+    category: str
+    description: str | None = None
+
+
+async def _get_or_create_api_user(session: AsyncSession) -> User:
+    result = await session.execute(select(User).where(User.telegram_id == API_USER_TELEGRAM_ID))
+    user = result.scalar_one_or_none()
+    if user is None:
+        user = User(telegram_id=API_USER_TELEGRAM_ID, username=API_USER_USERNAME)
+        session.add(user)
+        await session.flush()
+    return user
 
 
 @app.get("/api/transactions", response_model=list[TransactionOut])
@@ -81,6 +105,69 @@ async def get_summary() -> SummaryOut:
         total_expense=total_expense,
         balance=total_income - total_expense,
     )
+
+
+@app.post("/api/transactions", response_model=TransactionOut)
+async def create_transaction(payload: TransactionIn) -> TransactionOut:
+    if payload.amount <= 0:
+        raise HTTPException(status_code=400, detail="amount має бути більше 0")
+
+    if payload.type not in (TransactionType.income.value, TransactionType.expense.value):
+        raise HTTPException(status_code=400, detail="type має бути 'income' або 'expense'")
+
+    category_name = payload.category.strip()
+    if not category_name:
+        raise HTTPException(status_code=400, detail="category не може бути порожньою")
+
+    tx_type = TransactionType(payload.type)
+
+    async with async_session() as session:
+        user = await _get_or_create_api_user(session)
+
+        result = await session.execute(
+            select(Category).where(
+                Category.user_id == user.id,
+                Category.name == category_name,
+                Category.type == tx_type,
+            )
+        )
+        category = result.scalar_one_or_none()
+        if category is None:
+            category = Category(user_id=user.id, name=category_name, type=tx_type)
+            session.add(category)
+            await session.flush()
+
+        transaction = Transaction(
+            user_id=user.id,
+            category_id=category.id,
+            amount=payload.amount,
+            description=payload.description,
+        )
+        session.add(transaction)
+        await session.flush()
+        await session.commit()
+
+        return TransactionOut(
+            id=transaction.id,
+            amount=float(transaction.amount),
+            description=transaction.description,
+            category=category.name,
+            type=category.type,
+            created_at=transaction.created_at,
+        )
+
+
+@app.delete("/api/transactions/{transaction_id}")
+async def delete_transaction(transaction_id: int) -> dict:
+    async with async_session() as session:
+        transaction = await session.get(Transaction, transaction_id)
+        if transaction is None:
+            raise HTTPException(status_code=404, detail="Операцію не знайдено")
+
+        await session.delete(transaction)
+        await session.commit()
+
+    return {"deleted": transaction_id}
 
 
 if __name__ == "__main__":
