@@ -64,6 +64,24 @@ function App() {
       .catch((err) => setFormError(err.message))
   }
 
+  const handleDelete = (id) => {
+    if (!window.confirm('Видалити операцію?')) {
+      return
+    }
+
+    fetch(`http://localhost:8000/api/transactions/${id}`, {
+      method: 'DELETE',
+    })
+      .then((response) => {
+        if (!response.ok) {
+          throw new Error('Не вдалося видалити операцію')
+        }
+        fetchTransactions()
+        fetchSummary()
+      })
+      .catch((err) => alert(err.message))
+  }
+
   if (error) {
     return <p>{error}</p>
   }
@@ -128,6 +146,7 @@ function App() {
               <th>Сума</th>
               <th>Категорія</th>
               <th>Опис</th>
+              <th>Дії</th>
             </tr>
           </thead>
           <tbody>
@@ -138,6 +157,11 @@ function App() {
                 <td>{tx.amount}</td>
                 <td>{tx.category}</td>
                 <td>{tx.description}</td>
+                <td>
+                  <button type="button" onClick={() => handleDelete(tx.id)}>
+                    Видалити
+                  </button>
+                </td>
               </tr>
             ))}
           </tbody>
