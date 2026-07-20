@@ -11,6 +11,8 @@ function App() {
   const [description, setDescription] = useState('')
   const [formError, setFormError] = useState(null)
 
+  const [filter, setFilter] = useState('all')
+
   const fetchSummary = () => {
     fetch('http://localhost:8000/api/summary')
       .then((response) => response.json())
@@ -90,6 +92,12 @@ function App() {
     return <p>Завантаження...</p>
   }
 
+  const filteredTransactions = transactions.filter((tx) => {
+    if (filter === 'income') return tx.type === 'income'
+    if (filter === 'expense') return tx.type === 'expense'
+    return true
+  })
+
   return (
     <div>
       <div>
@@ -135,7 +143,40 @@ function App() {
         </button>
       </div>
 
-      {transactions.length === 0 ? (
+      <div>
+        <button
+          type="button"
+          onClick={() => setFilter('all')}
+          style={{
+            fontWeight: filter === 'all' ? 'bold' : 'normal',
+            background: filter === 'all' ? '#ddd' : undefined,
+          }}
+        >
+          Усі
+        </button>
+        <button
+          type="button"
+          onClick={() => setFilter('income')}
+          style={{
+            fontWeight: filter === 'income' ? 'bold' : 'normal',
+            background: filter === 'income' ? '#ddd' : undefined,
+          }}
+        >
+          Доходи
+        </button>
+        <button
+          type="button"
+          onClick={() => setFilter('expense')}
+          style={{
+            fontWeight: filter === 'expense' ? 'bold' : 'normal',
+            background: filter === 'expense' ? '#ddd' : undefined,
+          }}
+        >
+          Витрати
+        </button>
+      </div>
+
+      {filteredTransactions.length === 0 ? (
         <p>Немає операцій</p>
       ) : (
         <table>
@@ -150,7 +191,7 @@ function App() {
             </tr>
           </thead>
           <tbody>
-            {transactions.map((tx) => (
+            {filteredTransactions.map((tx) => (
               <tr key={tx.id}>
                 <td>{tx.created_at}</td>
                 <td>{tx.type}</td>
