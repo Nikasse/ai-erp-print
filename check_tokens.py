@@ -81,6 +81,24 @@ async def main() -> None:
         diff_pct = 0.0 if tokens == baseline else (tokens - baseline) / baseline * 100
         print(f"{name:<35}{tokens:>15}{diff_pct:>14.1f}%")
 
+    # Реальний виклик аналізу зі зведенням — щоб отримати output-токени.
+    # ask() з app/llm.py повертає лише текст відповіді, без response.usage,
+    # тому тут окремий прямий виклик client.messages.create().
+    print("\nРеальний виклик аналізу (зведення)...")
+    response = client.messages.create(
+        model=MODEL,
+        max_tokens=1024,
+        system=SYSTEM_STRONG,
+        messages=[{"role": "user", "content": variants["Зведення (новий підхід)"]}],
+    )
+
+    input_tokens = response.usage.input_tokens
+    output_tokens = response.usage.output_tokens
+
+    print(f"\n{'Input tokens':<20}{input_tokens:>10}")
+    print(f"{'Output tokens':<20}{output_tokens:>10}")
+    print(f"{'Разом токенів':<20}{input_tokens + output_tokens:>10}")
+
 
 if __name__ == "__main__":
     asyncio.run(main())
