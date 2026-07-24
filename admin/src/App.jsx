@@ -123,82 +123,105 @@ function App() {
   })
 
   return (
-    <div>
-      <div>
-        <h2>Доходи</h2>
-        <p>{summary.total_income}</p>
-      </div>
-      <div>
-        <h2>Витрати</h2>
-        <p>{summary.total_expense}</p>
-      </div>
-      <div>
-        <h2>Баланс</h2>
-        <p>{summary.balance}</p>
-      </div>
+    <div className="page">
+      <header className="page-header">
+        <h1>Фінансовий облік</h1>
+        <p className="page-subtitle">
+          Доходи, витрати та AI-аналіз в одному місці
+        </p>
+      </header>
 
-      <div>
+      <section className="summary-grid">
+        <div className="summary-card">
+          <span className="summary-label">Доходи</span>
+          <span className="summary-value summary-value--income">
+            {summary.total_income}
+          </span>
+        </div>
+        <div className="summary-card">
+          <span className="summary-label">Витрати</span>
+          <span className="summary-value summary-value--expense">
+            {summary.total_expense}
+          </span>
+        </div>
+        <div className="summary-card">
+          <span className="summary-label">Баланс</span>
+          <span
+            className={`summary-value ${
+              summary.balance >= 0
+                ? 'summary-value--income'
+                : 'summary-value--expense'
+            }`}
+          >
+            {summary.balance}
+          </span>
+        </div>
+      </section>
+
+      <section className="form-section">
         <h3>Нова операція</h3>
-        {formError && <p>{formError}</p>}
-        <input
-          type="number"
-          value={amount}
-          onChange={(e) => setAmount(e.target.value)}
-          placeholder="Сума"
-        />
-        <select value={type} onChange={(e) => setType(e.target.value)}>
-          <option value="income">income</option>
-          <option value="expense">expense</option>
-        </select>
-        <input
-          type="text"
-          value={category}
-          onChange={(e) => setCategory(e.target.value)}
-          placeholder="Категорія"
-        />
-        <input
-          type="text"
-          value={description}
-          onChange={(e) => setDescription(e.target.value)}
-          placeholder="Опис (необов'язково)"
-        />
-        <button type="button" onClick={handleAdd}>
-          Додати
-        </button>
-      </div>
+        {formError && <p className="form-error">{formError}</p>}
+        <div className="form-row">
+          <input
+            type="number"
+            className="form-input form-input--amount"
+            value={amount}
+            onChange={(e) => setAmount(e.target.value)}
+            placeholder="Сума"
+          />
+          <select
+            className="form-input form-input--select"
+            value={type}
+            onChange={(e) => setType(e.target.value)}
+          >
+            <option value="income">income</option>
+            <option value="expense">expense</option>
+          </select>
+          <input
+            type="text"
+            className="form-input form-input--category"
+            value={category}
+            onChange={(e) => setCategory(e.target.value)}
+            placeholder="Категорія"
+          />
+          <input
+            type="text"
+            className="form-input form-input--description"
+            value={description}
+            onChange={(e) => setDescription(e.target.value)}
+            placeholder="Опис (необов'язково)"
+          />
+          <button type="button" className="ai-button" onClick={handleAdd}>
+            Додати
+          </button>
+        </div>
+      </section>
 
-      <div>
-        <button
-          type="button"
-          onClick={() => setFilter('all')}
-          style={{
-            fontWeight: filter === 'all' ? 'bold' : 'normal',
-            background: filter === 'all' ? '#ddd' : undefined,
-          }}
-        >
-          Усі
-        </button>
-        <button
-          type="button"
-          onClick={() => setFilter('income')}
-          style={{
-            fontWeight: filter === 'income' ? 'bold' : 'normal',
-            background: filter === 'income' ? '#ddd' : undefined,
-          }}
-        >
-          Доходи
-        </button>
-        <button
-          type="button"
-          onClick={() => setFilter('expense')}
-          style={{
-            fontWeight: filter === 'expense' ? 'bold' : 'normal',
-            background: filter === 'expense' ? '#ddd' : undefined,
-          }}
-        >
-          Витрати
-        </button>
-      </div>
+      <section className="filters-section">
+        <div className="filter-switch">
+          <button
+            type="button"
+            className={`filter-btn ${filter === 'all' ? 'filter-btn--active' : ''}`}
+            onClick={() => setFilter('all')}
+          >
+            Усі
+          </button>
+          <button
+            type="button"
+            className={`filter-btn ${filter === 'income' ? 'filter-btn--active' : ''}`}
+            onClick={() => setFilter('income')}
+          >
+            Доходи
+          </button>
+          <button
+            type="button"
+            className={`filter-btn ${filter === 'expense' ? 'filter-btn--active' : ''}`}
+            onClick={() => setFilter('expense')}
+          >
+            Витрати
+          </button>
+        </div>
+      </section>
 
       <div className="ai-section">
         <h3>AI-аналіз</h3>
@@ -264,38 +287,57 @@ function App() {
         )}
       </div>
 
-      {filteredTransactions.length === 0 ? (
-        <p>Немає операцій</p>
-      ) : (
-        <table>
-          <thead>
-            <tr>
-              <th>Дата</th>
-              <th>Тип</th>
-              <th>Сума</th>
-              <th>Категорія</th>
-              <th>Опис</th>
-              <th>Дії</th>
-            </tr>
-          </thead>
-          <tbody>
-            {filteredTransactions.map((tx) => (
-              <tr key={tx.id}>
-                <td>{tx.created_at}</td>
-                <td>{tx.type}</td>
-                <td>{tx.amount}</td>
-                <td>{tx.category}</td>
-                <td>{tx.description}</td>
-                <td>
-                  <button type="button" onClick={() => handleDelete(tx.id)}>
-                    Видалити
-                  </button>
-                </td>
+      <section className="table-section">
+        {filteredTransactions.length === 0 ? (
+          <p className="empty-state">Немає операцій</p>
+        ) : (
+          <table className="tx-table">
+            <thead>
+              <tr>
+                <th>Дата</th>
+                <th>Тип</th>
+                <th className="tx-table__amount">Сума</th>
+                <th>Категорія</th>
+                <th>Опис</th>
+                <th className="tx-table__actions">Дії</th>
               </tr>
-            ))}
-          </tbody>
-        </table>
-      )}
+            </thead>
+            <tbody>
+              {filteredTransactions.map((tx) => (
+                <tr key={tx.id}>
+                  <td>{tx.created_at}</td>
+                  <td>
+                    <span className={`tx-type tx-type--${tx.type}`}>
+                      {tx.type}
+                    </span>
+                  </td>
+                  <td
+                    className={`tx-table__amount ${
+                      tx.type === 'income'
+                        ? 'tx-amount--income'
+                        : 'tx-amount--expense'
+                    }`}
+                  >
+                    {tx.amount}
+                  </td>
+                  <td>{tx.category}</td>
+                  <td>{tx.description}</td>
+                  <td className="tx-table__actions">
+                    <button
+                      type="button"
+                      className="icon-button"
+                      onClick={() => handleDelete(tx.id)}
+                      aria-label="Видалити операцію"
+                    >
+                      ✕
+                    </button>
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        )}
+      </section>
     </div>
   )
 }
