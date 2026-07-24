@@ -15,7 +15,7 @@ from sqlalchemy import select
 from app.db import async_session
 from app.llm import MODEL
 from app.models import Category, Transaction
-from app.prompts import SYSTEM_STRONG, build_prompt, build_summary
+from app.prompts import SYSTEM_STRONG, SYSTEM_STRONG_COMPACT, build_prompt, build_summary
 
 
 def build_raw_prompt(rows) -> str:
@@ -81,15 +81,17 @@ async def main() -> None:
         diff_pct = 0.0 if tokens == baseline else (tokens - baseline) / baseline * 100
         print(f"{name:<35}{tokens:>15}{diff_pct:>14.1f}%")
 
-    # Реальний виклик аналізу зі зведенням — щоб отримати output-токени.
+    # Реальні виклики аналізу зі зведенням — щоб отримати output-токени.
     # ask() з app/llm.py повертає лише текст відповіді, без response.usage,
-    # тому тут окремий прямий виклик client.messages.create().
-    print("\nРеальний виклик аналізу (зведення)...")
+    # тому тут окремі прямі виклики client.messages.create().
+    summary_prompt = variants["Зведення (новий підхід)"]
+
+    print("\nРеальний виклик аналізу (зведення, SYSTEM_STRONG)...")
     response = client.messages.create(
         model=MODEL,
         max_tokens=1024,
         system=SYSTEM_STRONG,
-        messages=[{"role": "user", "content": variants["Зведення (новий підхід)"]}],
+        messages=[{"role": "user", "content": summary_prompt}],
     )
 
     input_tokens = response.usage.input_tokens
@@ -98,6 +100,27 @@ async def main() -> None:
     print(f"\n{'Input tokens':<20}{input_tokens:>10}")
     print(f"{'Output tokens':<20}{output_tokens:>10}")
     print(f"{'Разом токенів':<20}{input_tokens + output_tokens:>10}")
+
+    print("\nРеальний виклик аналізу (зведення, SYSTEM_STRONG_COMPACT)...")
+    compact_response = client.messages.create(
+        model=MODEL,
+        max_tokens=1024,
+        system=SYSTEM_STRONG_COMPACT,
+        messages=[{"role": "user", "content": summary_prompt}],
+    )
+
+    compact_output_tokens = compact_response.usage.output_tokens
+
+    output_results = {
+        "SYSTEM_STRONG": output_tokens,
+        "SYSTEM_STRONG_COMPACT": compact_output_tokens,
+    }
+    output_baseline = output_results["SYSTEM_STRONG"]
+
+    print(f"\n{'Версія промпту':<25}{'Output tokens':>15}{'Різниця, %':>15}")
+    for name, tokens in output_results.items():
+        diff_pct = 0.0 if tokens == output_baseline else (tokens - output_baseline) / output_baseline * 100
+        print(f"{name:<25}{tokens:>15}{diff_pct:>14.1f}%")
 
 
 if __name__ == "__main__":
