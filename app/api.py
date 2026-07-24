@@ -1,12 +1,15 @@
+import json
+import re
 from datetime import datetime
 
 from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
-from pydantic import BaseModel
+from pydantic import BaseModel, ValidationError
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.db import async_session
+from app.llm import ask
 from app.models import Category, Transaction, TransactionType, User
 
 # Transactions/categories created through the API aren't tied to a Telegram
@@ -46,6 +49,13 @@ class TransactionIn(BaseModel):
     type: str
     category: str
     description: str | None = None
+
+
+class AnalysisOut(BaseModel):
+    summary: str
+    top_expense_categories: list[str]
+    risks: list[str]
+    advice: list[str]
 
 
 async def _get_or_create_api_user(session: AsyncSession) -> User:
@@ -168,6 +178,65 @@ async def delete_transaction(transaction_id: int) -> dict:
         await session.commit()
 
     return {"deleted": transaction_id}
+
+
+@app.post("/api/ai/analyze-transactions", response_model=AnalysisOut)
+async def analyze_transactions() -> AnalysisOut:
+    async with async_session() as session:
+        result = await session.execute(
+            select(
+                Transaction.created_at,
+                Transaction.amount,
+                Transaction.description,
+                Category.name.label("category"),
+                Category.type.label("type"),
+            )
+            .outerjoin(Category, Transaction.category_id == Category.id)
+            .order_by(Transaction.created_at.desc())
+            .limit(100)
+        )
+        rows = result.all()
+
+    if not rows:
+        raise HTTPException(status_code=400, detail="У базі немає операцій для аналізу")
+
+    lines = [
+        f"{row.created_at} | {row.type.value if row.type else '-'} | {row.amount} | "
+        f"{row.category or '-'} | {row.description or '-'}"
+        for row in rows
+    ]
+    prompt = (
+        "Ось список останніх фінансових операцій у форматі "
+        "\"дата | тип | сума | категорія | опис\":\n"
+        + "\n".join(lines)
+        + "\n\nПроаналізуй ці операції."
+    )
+    system_prompt = (
+        "ти фінансовий аналітик, відповідай виключно валідним JSON без markdown, "
+        "українською. Структура JSON: "
+        '{"summary": string, "top_expense_categories": [string], '
+        '"risks": [string], "advice": [string]}'
+    )
+
+    try:
+        raw_response = await ask(prompt, system=system_prompt)
+    except Exception:
+        raise HTTPException(status_code=502, detail="LLM недоступний")
+
+    if not raw_response:
+        raise HTTPException(status_code=502, detail="LLM недоступний")
+
+    cleaned = re.sub(r"^```(?:json)?\s*|\s*```$", "", raw_response.strip(), flags=re.IGNORECASE)
+
+    try:
+        data = json.loads(cleaned)
+    except json.JSONDecodeError:
+        raise HTTPException(status_code=502, detail="LLM повернув не-JSON")
+
+    try:
+        return AnalysisOut(**data)
+    except ValidationError:
+        raise HTTPException(status_code=502, detail="LLM повернув невірну структуру відповіді")
 
 
 if __name__ == "__main__":
