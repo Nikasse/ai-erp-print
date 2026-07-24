@@ -11,6 +11,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.db import async_session
 from app.llm import ask
 from app.models import Category, Transaction, TransactionType, User
+from app.prompts import SYSTEM_STRONG, build_prompt, build_summary
 
 # Transactions/categories created through the API aren't tied to a Telegram
 # user, so they're attributed to a single shared system user instead of
@@ -200,26 +201,10 @@ async def analyze_transactions() -> AnalysisOut:
     if not rows:
         raise HTTPException(status_code=400, detail="У базі немає операцій для аналізу")
 
-    lines = [
-        f"{row.created_at} | {row.type.value if row.type else '-'} | {row.amount} | "
-        f"{row.category or '-'} | {row.description or '-'}"
-        for row in rows
-    ]
-    prompt = (
-        "Ось список останніх фінансових операцій у форматі "
-        "\"дата | тип | сума | категорія | опис\":\n"
-        + "\n".join(lines)
-        + "\n\nПроаналізуй ці операції."
-    )
-    system_prompt = (
-        "ти фінансовий аналітик, відповідай виключно валідним JSON без markdown, "
-        "українською. Структура JSON: "
-        '{"summary": string, "top_expense_categories": [string], '
-        '"risks": [string], "advice": [string]}'
-    )
+    prompt = build_prompt(build_summary(rows))
 
     try:
-        raw_response = await ask(prompt, system=system_prompt)
+        raw_response = await ask(prompt, system=SYSTEM_STRONG)
     except Exception:
         raise HTTPException(status_code=502, detail="LLM недоступний")
 
