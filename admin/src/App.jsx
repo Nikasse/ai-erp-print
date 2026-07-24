@@ -13,6 +13,10 @@ function App() {
 
   const [filter, setFilter] = useState('all')
 
+  const [analysis, setAnalysis] = useState(null)
+  const [analyzing, setAnalyzing] = useState(false)
+  const [analysisError, setAnalysisError] = useState(null)
+
   const fetchSummary = () => {
     fetch('http://localhost:8000/api/summary')
       .then((response) => response.json())
@@ -82,6 +86,26 @@ function App() {
         fetchSummary()
       })
       .catch((err) => alert(err.message))
+  }
+
+  const handleAnalyze = () => {
+    setAnalyzing(true)
+    setAnalysisError(null)
+    setAnalysis(null)
+
+    fetch('http://localhost:8000/api/ai/analyze-transactions', {
+      method: 'POST',
+    })
+      .then(async (response) => {
+        const data = await response.json()
+        if (!response.ok) {
+          throw new Error(data.detail || 'Не вдалося виконати аналіз')
+        }
+        return data
+      })
+      .then((data) => setAnalysis(data))
+      .catch((err) => setAnalysisError(err.message))
+      .finally(() => setAnalyzing(false))
   }
 
   if (error) {
@@ -174,6 +198,70 @@ function App() {
         >
           Витрати
         </button>
+      </div>
+
+      <div className="ai-section">
+        <h3>AI-аналіз</h3>
+        <button
+          type="button"
+          className="ai-button"
+          onClick={handleAnalyze}
+          disabled={analyzing}
+        >
+          {analyzing ? 'Аналізую...' : 'Проаналізувати операції'}
+        </button>
+
+        {analysisError && (
+          <div className="ai-error-card">
+            <strong>Не вдалося виконати аналіз</strong>
+            <p style={{ margin: '8px 0 0' }}>{analysisError}</p>
+          </div>
+        )}
+
+        {analyzing && (
+          <div className="ai-cards-grid">
+            <div className="ai-skeleton-card" />
+            <div className="ai-skeleton-card" />
+            <div className="ai-skeleton-card" />
+            <div className="ai-skeleton-card" />
+          </div>
+        )}
+
+        {!analyzing && analysis && (
+          <div className="ai-cards-grid">
+            <div className="ai-card">
+              <h4 className="ai-card-title">Висновок 📊</h4>
+              <p>{analysis.summary}</p>
+            </div>
+
+            <div className="ai-card">
+              <h4 className="ai-card-title">Топ витрат 💸</h4>
+              <ul className="ai-list">
+                {analysis.top_expense_categories.map((item, index) => (
+                  <li key={index}>{item}</li>
+                ))}
+              </ul>
+            </div>
+
+            <div className="ai-card ai-card--risk">
+              <h4 className="ai-card-title">Ризики ⚠️</h4>
+              <ul className="ai-list">
+                {analysis.risks.map((item, index) => (
+                  <li key={index}>{item}</li>
+                ))}
+              </ul>
+            </div>
+
+            <div className="ai-card ai-card--advice">
+              <h4 className="ai-card-title">Поради 💡</h4>
+              <ul className="ai-list">
+                {analysis.advice.map((item, index) => (
+                  <li key={index}>{item}</li>
+                ))}
+              </ul>
+            </div>
+          </div>
+        )}
       </div>
 
       {filteredTransactions.length === 0 ? (
