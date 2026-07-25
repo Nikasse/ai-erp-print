@@ -1,6 +1,7 @@
 import json
 import re
 from datetime import datetime
+from uuid import uuid4
 
 from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
@@ -8,6 +9,7 @@ from pydantic import BaseModel, ValidationError
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.agent import chat as agent_chat
 from app.db import async_session
 from app.llm import ask
 from app.models import Category, Transaction, TransactionType, User
@@ -57,6 +59,16 @@ class AnalysisOut(BaseModel):
     top_expense_categories: list[str]
     risks: list[str]
     advice: list[str]
+
+
+class ChatIn(BaseModel):
+    message: str
+    thread_id: str | None = None
+
+
+class ChatOut(BaseModel):
+    answer: str
+    thread_id: str
 
 
 async def _get_or_create_api_user(session: AsyncSession) -> User:
@@ -222,6 +234,22 @@ async def analyze_transactions() -> AnalysisOut:
         return AnalysisOut(**data)
     except ValidationError:
         raise HTTPException(status_code=502, detail="LLM повернув невірну структуру відповіді")
+
+
+@app.post("/api/ai/chat", response_model=ChatOut)
+async def chat_with_agent(payload: ChatIn) -> ChatOut:
+    message = payload.message.strip()
+    if not message:
+        raise HTTPException(status_code=400, detail="message не може бути порожнім")
+
+    thread_id = payload.thread_id or str(uuid4())
+
+    try:
+        answer = await agent_chat(message, thread_id)
+    except Exception:
+        raise HTTPException(status_code=502, detail="AI-помічник недоступний")
+
+    return ChatOut(answer=answer, thread_id=thread_id)
 
 
 if __name__ == "__main__":
