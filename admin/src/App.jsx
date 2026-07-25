@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 
 function App() {
   const [summary, setSummary] = useState(null)
@@ -16,6 +16,13 @@ function App() {
   const [analysis, setAnalysis] = useState(null)
   const [analyzing, setAnalyzing] = useState(false)
   const [analysisError, setAnalysisError] = useState(null)
+
+  const [chatMessages, setChatMessages] = useState([])
+  const [chatInput, setChatInput] = useState('')
+  const [chatThreadId, setChatThreadId] = useState(null)
+  const [chatLoading, setChatLoading] = useState(false)
+  const [chatError, setChatError] = useState(null)
+  const chatInputRef = useRef(null)
 
   const fetchSummary = () => {
     fetch('http://localhost:8000/api/summary')
@@ -106,6 +113,40 @@ function App() {
       .then((data) => setAnalysis(data))
       .catch((err) => setAnalysisError(err.message))
       .finally(() => setAnalyzing(false))
+  }
+
+  const handleChatSend = () => {
+    const trimmed = chatInput.trim()
+    if (!trimmed) {
+      return
+    }
+
+    setChatMessages((prev) => [...prev, { role: 'user', content: trimmed }])
+    setChatLoading(true)
+    setChatError(null)
+
+    fetch('http://localhost:8000/api/ai/chat', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ message: trimmed, thread_id: chatThreadId }),
+    })
+      .then(async (response) => {
+        const data = await response.json()
+        if (!response.ok) {
+          throw new Error(data.detail || 'Не вдалося отримати відповідь')
+        }
+        return data
+      })
+      .then((data) => {
+        setChatThreadId(data.thread_id)
+        setChatMessages((prev) => [...prev, { role: 'assistant', content: data.answer }])
+      })
+      .catch((err) => setChatError(err.message))
+      .finally(() => {
+        setChatLoading(false)
+        setChatInput('')
+        chatInputRef.current?.focus()
+      })
   }
 
   if (error) {
@@ -285,6 +326,80 @@ function App() {
             </div>
           </div>
         )}
+      </div>
+
+      <div className="ai-section chat-section">
+        <h3>AI-помічник</h3>
+
+        <div className="chat-history">
+          {chatMessages.length === 0 && !chatLoading && (
+            <p className="chat-empty">
+              Постав запитання про свої фінанси, наприклад: "скільки я
+              витратив на їжу в червні?"
+            </p>
+          )}
+
+          {chatMessages.map((msg, index) => (
+            <div
+              key={index}
+              className={`chat-message ${
+                msg.role === 'user'
+                  ? 'chat-message--user'
+                  : 'chat-message--assistant'
+              }`}
+            >
+              <span className="chat-message__author">
+                {msg.role === 'user' ? 'Ви' : 'Помічник'}
+              </span>
+              <p className="chat-message__text">{msg.content}</p>
+            </div>
+          ))}
+
+          {chatLoading && (
+            <div className="chat-message chat-message--assistant">
+              <span className="chat-message__author">Помічник</span>
+              <p className="chat-message__text">
+                <span className="chat-typing-dots">
+                  <span></span>
+                  <span></span>
+                  <span></span>
+                </span>
+              </p>
+            </div>
+          )}
+        </div>
+
+        {chatError && (
+          <div className="ai-error-card">
+            <strong>Не вдалося отримати відповідь</strong>
+            <p style={{ margin: '8px 0 0' }}>{chatError}</p>
+          </div>
+        )}
+
+        <div className="chat-input-row">
+          <input
+            type="text"
+            ref={chatInputRef}
+            className="form-input chat-input"
+            value={chatInput}
+            onChange={(e) => setChatInput(e.target.value)}
+            onKeyDown={(e) => {
+              if (e.key === 'Enter' && !chatLoading) {
+                handleChatSend()
+              }
+            }}
+            placeholder="Запитайте про свої фінанси..."
+            disabled={chatLoading}
+          />
+          <button
+            type="button"
+            className="ai-button"
+            onClick={handleChatSend}
+            disabled={chatLoading}
+          >
+            {chatLoading ? 'Друкую...' : 'Надіслати'}
+          </button>
+        </div>
       </div>
 
       <section className="table-section">
