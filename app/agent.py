@@ -4,7 +4,7 @@
 react-агента через langgraph.prebuilt.create_react_agent з MemorySaver
 як checkpointer (short-term memory за thread_id).
 
-Ще ніде не підключений (ні до FastAPI endpoint, ні до бота) — це окремий крок.
+Використовується в app/api.py через POST /api/ai/chat (функція chat()).
 """
 
 import os

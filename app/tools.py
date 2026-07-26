@@ -4,8 +4,7 @@
 жодного INSERT/UPDATE/DELETE і жодного сирого SQL від моделі: усі запити
 побудовані через SQLAlchemy select() із фіксованими таблицями/полями.
 
-Поки що ці функції нікуди не підключені (ні до endpoint, ні до LangGraph
-tools) — підключення це окремий крок.
+Підключені як LangChain tools до LangGraph-агента в app/agent.py.
 """
 
 import calendar
