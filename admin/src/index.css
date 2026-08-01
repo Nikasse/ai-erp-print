@@ -319,6 +319,13 @@ code {
   text-align: right;
 }
 
+.tx-table__id {
+  width: 1%;
+  color: var(--text);
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+
 .tx-amount--income {
   color: var(--income);
   font-weight: 600;
