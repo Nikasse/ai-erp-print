@@ -139,13 +139,89 @@ function App() {
       })
       .then((data) => {
         setChatThreadId(data.thread_id)
-        setChatMessages((prev) => [...prev, { role: 'assistant', content: data.answer }])
+        setChatMessages((prev) => [
+          ...prev,
+          {
+            role: 'assistant',
+            content: data.answer,
+            pendingAction: data.pending_action
+              ? { ...data.pending_action, cardState: 'pending', resultText: null }
+              : null,
+          },
+        ])
       })
       .catch((err) => setChatError(err.message))
       .finally(() => {
         setChatLoading(false)
         setChatInput('')
         chatInputRef.current?.focus()
+      })
+  }
+
+  const updatePendingAction = (index, updates) => {
+    setChatMessages((prev) =>
+      prev.map((msg, i) =>
+        i === index && msg.pendingAction
+          ? { ...msg, pendingAction: { ...msg.pendingAction, ...updates } }
+          : msg
+      )
+    )
+  }
+
+  const handleConfirmAction = (index) => {
+    const action = chatMessages[index]?.pendingAction
+    if (!action || action.cardState !== 'pending') {
+      return
+    }
+
+    updatePendingAction(index, { cardState: 'loading' })
+
+    fetch(`http://localhost:8000/api/ai/actions/${action.action_id}/confirm`, {
+      method: 'POST',
+    })
+      .then(async (response) => {
+        const data = await response.json()
+        if (!response.ok) {
+          throw new Error(data.detail || 'Не вдалося підтвердити дію')
+        }
+        return data
+      })
+      .then((data) => {
+        updatePendingAction(index, {
+          cardState: 'confirmed',
+          resultText: `Підтверджено. Операція №${data.transaction_id}.`,
+        })
+        fetchTransactions()
+        fetchSummary()
+      })
+      .catch((err) => {
+        updatePendingAction(index, { cardState: 'error', resultText: err.message })
+      })
+  }
+
+  const handleCancelAction = (index) => {
+    const action = chatMessages[index]?.pendingAction
+    if (!action || action.cardState !== 'pending') {
+      return
+    }
+
+    updatePendingAction(index, { cardState: 'loading' })
+
+    fetch(`http://localhost:8000/api/ai/actions/${action.action_id}/cancel`, {
+      method: 'POST',
+    })
+      .then(async (response) => {
+        const data = await response.json()
+        if (!response.ok) {
+          throw new Error(data.detail || 'Не вдалося скасувати дію')
+        }
+        return data
+      })
+      .then(() => {
+        updatePendingAction(index, { cardState: 'cancelled', resultText: 'Скасовано.' })
+      })
+      .catch((err) => {
+        updatePendingAction(index, { cardState: 'error', resultText: err.message })
       })
   }
 
@@ -352,6 +428,95 @@ function App() {
                 {msg.role === 'user' ? 'Ви' : 'Помічник'}
               </span>
               <p className="chat-message__text">{msg.content}</p>
+
+              {msg.pendingAction && (
+                <div className="pending-action-card">
+                  <h4 className="pending-action-title">Запропонована дія</h4>
+
+                  <div className="pending-action-rows">
+                    {msg.pendingAction.action_type === 'create_transaction' ? (
+                      <>
+                        <div className="pending-action-row">
+                          <span className="pending-action-label">Тип</span>
+                          <span className="pending-action-value">
+                            {msg.pendingAction.payload.type === 'income' ? 'Дохід' : 'Витрата'}
+                          </span>
+                        </div>
+                        <div className="pending-action-row">
+                          <span className="pending-action-label">Сума</span>
+                          <span className="pending-action-value">
+                            {msg.pendingAction.payload.amount}
+                          </span>
+                        </div>
+                        <div className="pending-action-row">
+                          <span className="pending-action-label">Категорія</span>
+                          <span className="pending-action-value">
+                            {msg.pendingAction.payload.category}
+                          </span>
+                        </div>
+                        <div className="pending-action-row">
+                          <span className="pending-action-label">Дата</span>
+                          <span className="pending-action-value">
+                            {msg.pendingAction.payload.date}
+                          </span>
+                        </div>
+                        <div className="pending-action-row">
+                          <span className="pending-action-label">Опис</span>
+                          <span className="pending-action-value">
+                            {msg.pendingAction.payload.description || 'без опису'}
+                          </span>
+                        </div>
+                      </>
+                    ) : (
+                      <>
+                        <div className="pending-action-row">
+                          <span className="pending-action-label">ID операції</span>
+                          <span className="pending-action-value">
+                            {msg.pendingAction.payload.transaction_id}
+                          </span>
+                        </div>
+                        <div className="pending-action-row">
+                          <span className="pending-action-label">Нова категорія</span>
+                          <span className="pending-action-value">
+                            {msg.pendingAction.payload.new_category}
+                          </span>
+                        </div>
+                      </>
+                    )}
+                  </div>
+
+                  {(msg.pendingAction.cardState === 'pending' ||
+                    msg.pendingAction.cardState === 'loading') && (
+                    <div className="pending-action-buttons">
+                      <button
+                        type="button"
+                        className="ai-button"
+                        onClick={() => handleConfirmAction(index)}
+                        disabled={msg.pendingAction.cardState === 'loading'}
+                      >
+                        {msg.pendingAction.cardState === 'loading' ? 'Обробка...' : 'Підтвердити'}
+                      </button>
+                      <button
+                        type="button"
+                        className="ai-button ai-button--secondary"
+                        onClick={() => handleCancelAction(index)}
+                        disabled={msg.pendingAction.cardState === 'loading'}
+                      >
+                        {msg.pendingAction.cardState === 'loading' ? 'Обробка...' : 'Скасувати'}
+                      </button>
+                    </div>
+                  )}
+
+                  {msg.pendingAction.cardState !== 'pending' &&
+                    msg.pendingAction.cardState !== 'loading' && (
+                      <p
+                        className={`pending-action-result pending-action-result--${msg.pendingAction.cardState}`}
+                      >
+                        {msg.pendingAction.resultText}
+                      </p>
+                    )}
+                </div>
+              )}
             </div>
           ))}
 

@@ -11,16 +11,27 @@ from datetime import date as date_cls
 
 
 def prepare_create_transaction(
-    type: str, amount: float, category: str, description: str, date: str | None = None
+    type: str,
+    amount: float,
+    category: str,
+    date: str | None = None,
+    description: str | None = None,
 ) -> str:
     """Готує чернетку створення транзакції. Нічого не пише в базу.
 
     Параметр date передавай лише якщо користувач назвав конкретний день
     (наприклад "15 січня" чи "2026-01-15"). Якщо користувач сказав
     "сьогодні" або взагалі не згадав дату — НЕ передавай date, backend
-    сам підставить поточну дату сервера."""
+    сам підставить поточну дату сервера.
+
+    Параметр description передавай лише якщо користувач сам його назвав
+    (наприклад "таксі додому"). Якщо опису немає — НЕ передавай description
+    і НЕ питай користувача про нього, і не вигадуй опис сам: чернетка
+    прекрасно готується без опису, він необов'язковий."""
     if not date:
         date = date_cls.today().isoformat()
+    if not description:
+        description = ""
     return json.dumps({
         "action_type": "create_transaction",
         "payload": {
