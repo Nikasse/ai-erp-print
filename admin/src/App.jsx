@@ -574,6 +574,7 @@ function App() {
           <table className="tx-table">
             <thead>
               <tr>
+                <th className="tx-table__id">№</th>
                 <th>Дата</th>
                 <th>Тип</th>
                 <th className="tx-table__amount">Сума</th>
@@ -585,6 +586,7 @@ function App() {
             <tbody>
               {filteredTransactions.map((tx) => (
                 <tr key={tx.id}>
+                  <td className="tx-table__id">{tx.id}</td>
                   <td>{tx.created_at}</td>
                   <td>
                     <span className={`tx-type tx-type--${tx.type}`}>
