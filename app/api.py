@@ -5,6 +5,7 @@ from uuid import uuid4
 
 from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
+from langchain_core.messages import ToolMessage
 from pydantic import BaseModel, ValidationError
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -12,8 +13,12 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.agent import chat as agent_chat
 from app.db import async_session
 from app.llm import ask
-from app.models import Category, Transaction, TransactionType, User
+from app.models import Category, PendingAction, Transaction, TransactionType, User
 from app.prompts import SYSTEM_STRONG, build_prompt, build_summary
+
+# Prepare-tools, чий останній виклик у result["messages"] перетворюється
+# на запис у pending_actions (сам виклик tool нічого в базу не пише).
+_PREPARE_TOOL_NAMES = {"prepare_create_transaction", "prepare_change_category"}
 
 # Transactions/categories created through the API aren't tied to a Telegram
 # user, so they're attributed to a single shared system user instead of
@@ -66,9 +71,17 @@ class ChatIn(BaseModel):
     thread_id: str | None = None
 
 
+class PendingActionOut(BaseModel):
+    action_id: str
+    action_type: str
+    payload: dict
+    status: str
+
+
 class ChatOut(BaseModel):
     answer: str
     thread_id: str
+    pending_action: PendingActionOut | None = None
 
 
 async def _get_or_create_api_user(session: AsyncSession) -> User:
@@ -245,11 +258,36 @@ async def chat_with_agent(payload: ChatIn) -> ChatOut:
     thread_id = payload.thread_id or str(uuid4())
 
     try:
-        answer = await agent_chat(message, thread_id)
+        answer, messages = await agent_chat(message, thread_id)
     except Exception:
         raise HTTPException(status_code=502, detail="AI-помічник недоступний")
 
-    return ChatOut(answer=answer, thread_id=thread_id)
+    pending_action = None
+    for msg in reversed(messages):
+        if isinstance(msg, ToolMessage) and msg.name in _PREPARE_TOOL_NAMES:
+            parsed = json.loads(msg.content)
+            async with async_session() as session:
+                user = await _get_or_create_api_user(session)
+                action = PendingAction(
+                    action_id=str(uuid4()),
+                    user_id=user.id,
+                    thread_id=thread_id,
+                    action_type=parsed["action_type"],
+                    payload=parsed["payload"],
+                    status="pending",
+                )
+                session.add(action)
+                await session.commit()
+
+                pending_action = PendingActionOut(
+                    action_id=action.action_id,
+                    action_type=action.action_type,
+                    payload=action.payload,
+                    status=action.status,
+                )
+            break
+
+    return ChatOut(answer=answer, thread_id=thread_id, pending_action=pending_action)
 
 
 if __name__ == "__main__":
