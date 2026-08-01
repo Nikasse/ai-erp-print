@@ -1,10 +1,13 @@
 import json
+import logging
 import re
-from datetime import datetime
+from datetime import date as date_cls
+from datetime import datetime, timezone
 from uuid import uuid4
 
 from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
+from langchain_core.messages import ToolMessage
 from pydantic import BaseModel, ValidationError
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -12,8 +15,16 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.agent import chat as agent_chat
 from app.db import async_session
 from app.llm import ask
-from app.models import Category, Transaction, TransactionType, User
+from app.models import Category, PendingAction, Transaction, TransactionType, User
 from app.prompts import SYSTEM_STRONG, build_prompt, build_summary
+
+# Prepare-tools, чий останній виклик у result["messages"] перетворюється
+# на запис у pending_actions (сам виклик tool нічого в базу не пише).
+_PREPARE_TOOL_NAMES = {"prepare_create_transaction", "prepare_change_category"}
+
+_KNOWN_ACTION_TYPES = {"create_transaction", "change_category"}
+
+_action_logger = logging.getLogger("ai_actions")
 
 # Transactions/categories created through the API aren't tied to a Telegram
 # user, so they're attributed to a single shared system user instead of
@@ -66,9 +77,28 @@ class ChatIn(BaseModel):
     thread_id: str | None = None
 
 
+class PendingActionOut(BaseModel):
+    action_id: str
+    action_type: str
+    payload: dict
+    status: str
+
+
 class ChatOut(BaseModel):
     answer: str
     thread_id: str
+    pending_action: PendingActionOut | None = None
+
+
+class ActionConfirmOut(BaseModel):
+    action_id: str
+    status: str
+    transaction_id: int
+
+
+class ActionCancelOut(BaseModel):
+    action_id: str
+    status: str
 
 
 async def _get_or_create_api_user(session: AsyncSession) -> User:
@@ -79,6 +109,90 @@ async def _get_or_create_api_user(session: AsyncSession) -> User:
         session.add(user)
         await session.flush()
     return user
+
+
+def _log_action_audit(
+    action_id: str,
+    thread_id: str,
+    action_type: str,
+    status: str,
+    *,
+    result: int | None = None,
+    error: str | None = None,
+) -> None:
+    # Тільки метадані дії — жодного payload цілком і жодних секретів (ключі,
+    # DATABASE_URL, BOT_TOKEN, .env сюди не потрапляють).
+    _action_logger.info(
+        "action_id=%s thread_id=%s action_type=%s status=%s result=%s error=%s",
+        action_id,
+        thread_id,
+        action_type,
+        status,
+        result,
+        error,
+    )
+
+
+async def _get_own_pending_action(session: AsyncSession, action_id: str, user: User) -> PendingAction:
+    action = await session.get(PendingAction, action_id)
+    if action is None:
+        raise HTTPException(status_code=404, detail="Дію не знайдено")
+    if action.user_id != user.id:
+        raise HTTPException(status_code=403, detail="Дія належить іншому користувачу")
+    if action.status != "pending":
+        raise HTTPException(status_code=409, detail=f"Дія вже має статус '{action.status}'")
+    return action
+
+
+def _validate_create_transaction_payload(payload: dict) -> str | None:
+    """Повертає текст помилки або None. Не довіряє тому, що payload уже
+    пройшов валідацію в prepare-tool — перевіряє все заново."""
+    tx_type = payload.get("type")
+    if tx_type not in (TransactionType.income.value, TransactionType.expense.value):
+        return "type має бути 'income' або 'expense'"
+
+    amount = payload.get("amount")
+    if isinstance(amount, bool) or not isinstance(amount, (int, float)) or amount <= 0:
+        return "amount має бути числом більше 0"
+
+    category = payload.get("category")
+    if not isinstance(category, str) or not category.strip():
+        return "category не може бути порожньою"
+
+    date_value = payload.get("date")
+    if not isinstance(date_value, str):
+        return "date має бути рядком"
+    try:
+        date_cls.fromisoformat(date_value)
+    except ValueError:
+        return "date має бути у форматі YYYY-MM-DD"
+
+    return None
+
+
+async def _validate_change_category_payload(
+    session: AsyncSession, user_id: int, payload: dict
+) -> tuple[str | None, Transaction | None, TransactionType | None]:
+    """Повертає (error, transaction, current_type). error є None лише якщо
+    transaction_id існує, належить цьому user_id, і new_category непорожня."""
+    transaction_id = payload.get("transaction_id")
+    if not isinstance(transaction_id, int) or isinstance(transaction_id, bool):
+        return "transaction_id має бути цілим числом", None, None
+
+    new_category = payload.get("new_category")
+    if not isinstance(new_category, str) or not new_category.strip():
+        return "new_category не може бути порожньою", None, None
+
+    transaction = await session.get(Transaction, transaction_id)
+    if transaction is None or transaction.user_id != user_id:
+        return "transaction_id не знайдено для цього користувача", None, None
+
+    result = await session.execute(select(Category.type).where(Category.id == transaction.category_id))
+    current_type = result.scalar_one_or_none()
+    if current_type is None:
+        return "У операції немає категорії — тип визначити неможливо", None, None
+
+    return None, transaction, current_type
 
 
 @app.get("/api/transactions", response_model=list[TransactionOut])
@@ -245,11 +359,148 @@ async def chat_with_agent(payload: ChatIn) -> ChatOut:
     thread_id = payload.thread_id or str(uuid4())
 
     try:
-        answer = await agent_chat(message, thread_id)
+        answer, messages = await agent_chat(message, thread_id)
     except Exception:
         raise HTTPException(status_code=502, detail="AI-помічник недоступний")
 
-    return ChatOut(answer=answer, thread_id=thread_id)
+    pending_action = None
+    for msg in reversed(messages):
+        if isinstance(msg, ToolMessage) and msg.name in _PREPARE_TOOL_NAMES:
+            parsed = json.loads(msg.content)
+            async with async_session() as session:
+                user = await _get_or_create_api_user(session)
+                action = PendingAction(
+                    action_id=str(uuid4()),
+                    user_id=user.id,
+                    thread_id=thread_id,
+                    action_type=parsed["action_type"],
+                    payload=parsed["payload"],
+                    status="pending",
+                )
+                session.add(action)
+                await session.commit()
+
+                pending_action = PendingActionOut(
+                    action_id=action.action_id,
+                    action_type=action.action_type,
+                    payload=action.payload,
+                    status=action.status,
+                )
+            break
+
+    return ChatOut(answer=answer, thread_id=thread_id, pending_action=pending_action)
+
+
+@app.post("/api/ai/actions/{action_id}/confirm", response_model=ActionConfirmOut)
+async def confirm_action(action_id: str) -> ActionConfirmOut:
+    """Виконує підготовлену AI-дію рівно один раз.
+
+    Захист від повторного виконання — перевірка status == "pending" у
+    _get_own_pending_action: як тільки статус змінюється на "confirmed",
+    "cancelled" чи "failed", повторний confirm того самого action_id
+    завжди впаде з 409, а не виконає дію ще раз.
+
+    Для create_transaction: payload.date валідується (має парситись як
+    дата), але НЕ записується в Transaction — у моделі Transaction немає
+    окремого поля дати, є лише created_at через server_default, тож
+    транзакція отримує поточний час створення, а не дату з payload.
+    """
+    async with async_session() as session:
+        user = await _get_or_create_api_user(session)
+        action = await _get_own_pending_action(session, action_id, user)
+
+        transaction: Transaction | None = None
+        current_type: TransactionType | None = None
+
+        if action.action_type == "create_transaction":
+            error = _validate_create_transaction_payload(action.payload)
+        elif action.action_type == "change_category":
+            error, transaction, current_type = await _validate_change_category_payload(
+                session, user.id, action.payload
+            )
+        else:
+            error = f"Невідомий тип дії: {action.action_type}"
+
+        if error:
+            action.status = "failed"
+            await session.commit()
+            _log_action_audit(action_id, action.thread_id, action.action_type, "failed", error=error)
+            raise HTTPException(status_code=422, detail=error)
+
+        if action.action_type == "create_transaction":
+            payload = action.payload
+            tx_type = TransactionType(payload["type"])
+            category_name = payload["category"].strip()
+
+            result = await session.execute(
+                select(Category).where(
+                    Category.user_id == user.id,
+                    Category.name == category_name,
+                    Category.type == tx_type,
+                )
+            )
+            category = result.scalar_one_or_none()
+            if category is None:
+                category = Category(user_id=user.id, name=category_name, type=tx_type)
+                session.add(category)
+                await session.flush()
+
+            new_transaction = Transaction(
+                user_id=user.id,
+                category_id=category.id,
+                amount=payload["amount"],
+                description=payload.get("description"),
+            )
+            session.add(new_transaction)
+            await session.flush()
+            transaction_id = new_transaction.id
+        else:
+            new_category_name = action.payload["new_category"].strip()
+
+            result = await session.execute(
+                select(Category).where(
+                    Category.user_id == user.id,
+                    Category.name == new_category_name,
+                    Category.type == current_type,
+                )
+            )
+            category = result.scalar_one_or_none()
+            if category is None:
+                category = Category(user_id=user.id, name=new_category_name, type=current_type)
+                session.add(category)
+                await session.flush()
+
+            transaction.category_id = category.id
+            transaction_id = transaction.id
+
+        action.status = "confirmed"
+        action.confirmed_at = datetime.now(timezone.utc)
+        await session.commit()
+
+        _log_action_audit(action_id, action.thread_id, action.action_type, "confirmed", result=transaction_id)
+
+        return ActionConfirmOut(action_id=action.action_id, status=action.status, transaction_id=transaction_id)
+
+
+@app.post("/api/ai/actions/{action_id}/cancel", response_model=ActionCancelOut)
+async def cancel_action(action_id: str) -> ActionCancelOut:
+    """Скасовує підготовлену AI-дію, не чіпаючи таблицю transactions.
+
+    Захист від подвійної дії — та сама перевірка status == "pending" у
+    _get_own_pending_action, що й у confirm: скасувати можна лише дію, яка
+    ще не була ні підтверджена, ні скасована раніше.
+    """
+    async with async_session() as session:
+        user = await _get_or_create_api_user(session)
+        action = await _get_own_pending_action(session, action_id, user)
+
+        action.status = "cancelled"
+        action.confirmed_at = datetime.now(timezone.utc)
+        await session.commit()
+
+        _log_action_audit(action_id, action.thread_id, action.action_type, "cancelled")
+
+        return ActionCancelOut(action_id=action.action_id, status=action.status)
 
 
 if __name__ == "__main__":
