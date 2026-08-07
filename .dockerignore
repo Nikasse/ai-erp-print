@@ -1,0 +1,9 @@
+node_modules
+admin/node_modules
+admin/dist
+.env
+__pycache__
+*.pyc
+.git
+.DS_Store
+docs

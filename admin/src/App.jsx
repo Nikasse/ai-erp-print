@@ -25,14 +25,14 @@ function App() {
   const chatInputRef = useRef(null)
 
   const fetchSummary = () => {
-    fetch('http://localhost:8000/api/summary')
+    fetch('/api/summary')
       .then((response) => response.json())
       .then((data) => setSummary(data))
       .catch(() => setError('Не вдалося завантажити дані'))
   }
 
   const fetchTransactions = () => {
-    fetch('http://localhost:8000/api/transactions')
+    fetch('/api/transactions')
       .then((response) => response.json())
       .then((data) => setTransactions(data))
       .catch(() => setTransactions([]))
@@ -49,7 +49,7 @@ function App() {
   const handleAdd = () => {
     setFormError(null)
 
-    fetch('http://localhost:8000/api/transactions', {
+    fetch('/api/transactions', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
@@ -82,7 +82,7 @@ function App() {
       return
     }
 
-    fetch(`http://localhost:8000/api/transactions/${id}`, {
+    fetch(`/api/transactions/${id}`, {
       method: 'DELETE',
     })
       .then((response) => {
@@ -100,7 +100,7 @@ function App() {
     setAnalysisError(null)
     setAnalysis(null)
 
-    fetch('http://localhost:8000/api/ai/analyze-transactions', {
+    fetch('/api/ai/analyze-transactions', {
       method: 'POST',
     })
       .then(async (response) => {
@@ -125,7 +125,7 @@ function App() {
     setChatLoading(true)
     setChatError(null)
 
-    fetch('http://localhost:8000/api/ai/chat', {
+    fetch('/api/ai/chat', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ message: trimmed, thread_id: chatThreadId }),
@@ -176,7 +176,7 @@ function App() {
 
     updatePendingAction(index, { cardState: 'loading' })
 
-    fetch(`http://localhost:8000/api/ai/actions/${action.action_id}/confirm`, {
+    fetch(`/api/ai/actions/${action.action_id}/confirm`, {
       method: 'POST',
     })
       .then(async (response) => {
@@ -207,7 +207,7 @@ function App() {
 
     updatePendingAction(index, { cardState: 'loading' })
 
-    fetch(`http://localhost:8000/api/ai/actions/${action.action_id}/cancel`, {
+    fetch(`/api/ai/actions/${action.action_id}/cancel`, {
       method: 'POST',
     })
       .then(async (response) => {

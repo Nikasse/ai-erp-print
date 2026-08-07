@@ -1,5 +1,6 @@
 import json
 import logging
+import os
 import re
 from datetime import date as date_cls
 from datetime import datetime, timezone
@@ -34,13 +35,30 @@ API_USER_USERNAME = "api"
 
 app = FastAPI(title="ai-erp-print API")
 
+# У production фронтенд віддається тим самим сервісом (той самий origin),
+# тому CORS не потрібен. Локально Vite проксує /api, але dev-режим без
+# проксі теж має працювати — звідси localhost:5173.
+APP_ENV = os.getenv("APP_ENV", "development")
+_ALLOWED_ORIGINS = [] if APP_ENV == "production" else ["http://localhost:5173"]
+
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["http://localhost:5173"],
+    allow_origins=_ALLOWED_ORIGINS,
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+
+@app.get("/health")
+async def health():
+    """Liveness-перевірка для Render.
+
+    Навмисно НЕ звертається до бази: Neon на free tier засинає, і перший
+    запит після сну падає. Якщо health check це зачепить — Render вирішить,
+    що сервіс не піднявся, і завалить робочий deploy.
+    """
+    return {"status": "ok", "env": APP_ENV}
 
 
 class TransactionOut(BaseModel):
