@@ -4,3 +4,12 @@ services:
     env_file:
       - .env
     restart: unless-stopped
+
+  api:
+    build:
+      context: .
+      dockerfile: Dockerfile.render
+    ports:
+      - "8000:8000"
+    env_file:
+      - .env
