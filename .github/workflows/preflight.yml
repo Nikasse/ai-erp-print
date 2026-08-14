@@ -1,0 +1,56 @@
+name: preflight
+
+# Той самий preflight, що запускається локально командою
+# `python scripts/preflight.py`. Workflow лише готує середовище і викликає
+# скрипт — жодна перевірка тут не дублюється. Логіка живе в одному місці
+# (scripts/preflight.py), інакше локальний і серверний набори перевірок
+# почали б розходитись.
+
+on:
+  pull_request:
+    branches: [main]
+  push:
+    branches: [main]
+
+# Preflight не звертається ні до бази, ні до Anthropic API: він компілює
+# код, збирає фронтенд і образ, шукає секрети в git-файлах. Тому в job не
+# передається жодного secret — ні DATABASE_URL, ні ANTHROPIC_API_KEY,
+# ні BOT_TOKEN. Якщо колись знадобиться секрет — це сигнал, що перевірка
+# вийшла за межі preflight.
+permissions:
+  contents: read
+
+# Новий push у PR скасовує попередній прогін — щоб не збирати образ двічі.
+concurrency:
+  group: preflight-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  preflight:
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      # Python 3.12 — та сама версія, що в фінальній стадії
+      # Dockerfile.render (python:3.12-slim).
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+          cache: pip
+          cache-dependency-path: requirements.txt
+
+      # Node 20 — та сама версія, що в build-стадії Dockerfile.render
+      # (node:20-alpine). Розбіжність означала б, що CI перевіряє не те
+      # середовище, яке піде в production.
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: npm
+          cache-dependency-path: admin/package-lock.json
+
+      - name: Install Python dependencies
+        run: pip install -r requirements.txt
+
+      - name: Run preflight
+        run: python scripts/preflight.py
