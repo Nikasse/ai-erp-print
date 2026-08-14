@@ -350,6 +350,7 @@ async def analyze_transactions() -> AnalysisOut:
     try:
         raw_response = await ask(prompt, system=SYSTEM_STRONG)
     except Exception:
+        _action_logger.exception("ask() у analyze_transactions впав")
         raise HTTPException(status_code=502, detail="LLM недоступний")
 
     if not raw_response:
@@ -379,6 +380,7 @@ async def chat_with_agent(payload: ChatIn) -> ChatOut:
     try:
         answer, messages = await agent_chat(message, thread_id)
     except Exception:
+        _action_logger.exception("agent_chat() у chat_with_agent впав")
         raise HTTPException(status_code=502, detail="AI-помічник недоступний")
 
     pending_action = None
